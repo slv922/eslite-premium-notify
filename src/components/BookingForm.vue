@@ -1,70 +1,73 @@
 <template>
   <div class="space-y-4">
-    <div class="space-y-2">
-      <label class="block text-sm font-medium text-gray-700">
-        訂位網址或代碼
-      </label>
-      <input 
-        v-model="bookingCode"
-        type="text"
-        class="input w-full"
-        placeholder="請輸入訂位網址或代碼 (例如: EKHZG6)"
-        :disabled="isTracking"
-      >
-    </div>
+    <!-- 訂位表單 -->
+    <div v-if="waitlistClosed === false">
+      <div class="space-y-2">
+        <label class="block text-sm font-medium text-gray-700">
+          訂位網址或代碼
+        </label>
+        <input 
+          v-model="bookingCode"
+          type="text"
+          class="input w-full"
+          placeholder="請輸入訂位網址或代碼 (例如: EKHZG6)"
+          :disabled="isTracking"
+        >
+      </div>
 
-    <div class="space-y-2">
-      <label class="block text-sm font-medium text-gray-700">
-        查詢間隔（秒）
-      </label>
-      <input 
-        v-model="interval"
-        type="number"
-        min="30"
-        class="input w-32"
-        :disabled="isTracking"
-      >
-    </div>
+      <div class="space-y-2">
+        <label class="block text-sm font-medium text-gray-700">
+          查詢間隔（秒）
+        </label>
+        <input 
+          v-model="interval"
+          type="number"
+          min="30"
+          class="input w-32"
+          :disabled="isTracking"
+        >
+      </div>
 
-    <div class="flex space-x-4">
-      <button 
-        v-if="!isTracking"
-        @click="startTracking"
-        class="btn btn-primary"
-        :disabled="!isValid"
-      >
-        開始追蹤
-      </button>
-      <button 
-        v-else
-        @click="stopTracking"
-        class="btn btn-secondary"
-      >
-        停止追蹤
-      </button>
-    </div>
+      <div class="flex space-x-4">
+        <button 
+          v-if="!isTracking"
+          @click="startTracking"
+          class="btn btn-primary"
+          :disabled="!isValid"
+        >
+          開始追蹤
+        </button>
+        <button 
+          v-else
+          @click="stopTracking"
+          class="btn btn-secondary"
+        >
+          停止追蹤
+        </button>
+      </div>
 
-    <div v-if="error" class="text-red-500 text-sm mt-2">
-      {{ error }}
+      <div v-if="error" class="text-red-500 text-sm mt-2">
+        {{ error }}
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-
-const props = defineProps<{
-  isTracking: boolean
-}>()
-
 const emit = defineEmits<{
   (e: 'startTracking', code: string, interval: number): void
   (e: 'stopTracking'): void
 }>()
 
+const props = defineProps<{
+  waitlistClosed: boolean | null
+}>()
+
 const bookingCode = ref('')
 const interval = ref(60)
 const error = ref('')
+const isTracking = ref(false) // 定義 isTracking 狀態
 
 const validateBookingCode = (code: string): boolean => {
   // 檢查是否為純訂位代碼（6位英數字）
@@ -102,6 +105,7 @@ const extractBookingCode = (input: string): string => {
 }
 
 const startTracking = () => {
+  isTracking.value = true // 開始追蹤時設置為 true
   error.value = ''
   if (!isValid.value) {
     if (!validateBookingCode(bookingCode.value.trim())) {
@@ -109,6 +113,7 @@ const startTracking = () => {
     } else if (interval.value < 30) {
       error.value = '查詢間隔請勿低於 30 秒'
     }
+    isTracking.value = false // 若驗證失敗，重置為 false
     return
   }
   const code = extractBookingCode(bookingCode.value.trim())
@@ -116,6 +121,7 @@ const startTracking = () => {
 }
 
 const stopTracking = () => {
+  isTracking.value = false // 停止追蹤時設置為 false
   emit('stopTracking')
 }
 </script>

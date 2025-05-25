@@ -21,6 +21,7 @@ export function useBookingTracker(options: TrackingOptions) {
             timeout: 5000
           }
         )
+        console.log('Booking status response:', response.data)
         return {
           bookingCode,
           position: response.data.position,
@@ -53,6 +54,7 @@ export function useBookingTracker(options: TrackingOptions) {
           text: message
         }
       )
+      console.log('Telegram message sent:', message)
 
       return '通知發送成功'
     } catch (error) {
@@ -95,4 +97,19 @@ export function useBookingTracker(options: TrackingOptions) {
     startTracking,
     stopTracking
   }
+}
+
+// 模擬查詢訂位資訊的 API
+export async function checkBookingStatus(bookingCode: string): Promise<{ position: number; ahead_groups: null }> {
+  // 模擬查詢結果
+  const mockResponse = {
+    position: Math.floor(Math.random() * 50) + 1, // 隨機生成 1 到 50 的位置
+    ahead_groups: null,
+  };
+
+  console.log(`模擬查詢訂位代碼: ${bookingCode}, 回應:`, mockResponse);
+
+  return new Promise((resolve) => {
+    setTimeout(() => resolve(mockResponse), 1000); // 模擬 API 延遲 1 秒
+  });
 }
