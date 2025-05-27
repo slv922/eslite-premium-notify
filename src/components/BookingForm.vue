@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-4">
     <!-- 訂位表單 -->
-    <div v-if="waitlistClosed === false">
+    <div>
       <div class="space-y-2">
         <label class="block text-sm font-medium text-gray-700">
           訂位網址或代碼
@@ -58,10 +58,6 @@ import { ref, computed, watch } from 'vue'
 const emit = defineEmits<{
   (e: 'startTracking', code: string, interval: number): void
   (e: 'stopTracking'): void
-}>()
-
-const props = defineProps<{
-  waitlistClosed: boolean | null
 }>()
 
 const bookingCode = ref('')
