@@ -52,8 +52,13 @@
                 :waitlist-closed="waitlistClosed" 
               />
 
+              <!-- 追蹤錯誤 -->
+              <div v-if="trackingError" class="mt-4 p-3 bg-red-100 text-red-800 rounded border border-red-300 text-sm">
+                {{ trackingError }}
+              </div>
+
               <!-- 追蹤結果 -->
-              <BookingStatus 
+              <BookingStatus
                 v-if="bookingStatus"
                 :status="bookingStatus"
                 :last-updated="lastUpdated"
@@ -75,6 +80,7 @@ import type { BookingStatus as BookingStatusType } from './types'
 import axios from 'axios'
 
 const isTracking = ref(false)
+const trackingError = ref('')
 const bookingStatus = ref<BookingStatusType | null>(null)
 const lastUpdated = ref<Date | null>(null)
 
@@ -98,12 +104,7 @@ onMounted(async () => {
       console.log('Mock Waitlist return:', mockResponse);
       waitlistClosed.value = mockResponse.waitlist_status === 'closed';
     } else {
-      // 真實 API 請求
-      console.log('Fetching real waitlist status...');
-      const apiUrl = import.meta.env.VITE_API_ENV === 'mock'
-      ? '/api/v2/waitlist/status' // 使用模擬 API
-      : '/api/v2/waitlist/status?shop_slug=eslite-premium-xindian&service_mode=dining'; // 使用代理的真實 API
-      const res = await axios.get(apiUrl, {
+      const res = await axios.get('/api/v2/waitlist/status?shop_slug=eslite-premium-xindian&service_mode=dining', {
         headers: { Accept: 'application/json' },
       });
       console.log('Waitlist return:', res.data);
@@ -117,12 +118,12 @@ onMounted(async () => {
 
 const { startTracking: startTrackingService, stopTracking: stopTrackingService } = useBookingTracker({
   onStatusUpdate: (status) => {
+    trackingError.value = ''
     bookingStatus.value = status
     lastUpdated.value = new Date()
   },
   onError: (error) => {
-    console.error('Tracking error:', error)
-    // TODO: Add error handling UI
+    trackingError.value = error.message
   }
 })
 
@@ -136,14 +137,25 @@ const stopTracking = () => {
   stopTrackingService()
 }
 
-// 新增：通知相關函式
+const sendWaitlistClosedNotification = async () => {
+  const token = import.meta.env.VITE_TELEGRAM_BOT_TOKEN
+  const chatId = import.meta.env.VITE_TELEGRAM_CHAT_ID
+  if (!token || !chatId) return
+  try {
+    await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+      chat_id: chatId,
+      text: '誠品餐廳目前不開放候補，系統持續監控中...'
+    })
+  } catch (e) {
+    console.error('Telegram 通知失敗:', e)
+  }
+}
+
 const startNotification = () => {
   if (isNotifying.value) return
   isNotifying.value = true
-  notificationTimer = window.setInterval(() => {
-    console.log('通知：餐廳目前不開放訂位')
-    // 在這裡可以加入發送通知的邏輯，例如 Telegram 通知
-  }, notificationInterval.value * 1000)
+  sendWaitlistClosedNotification()
+  notificationTimer = window.setInterval(sendWaitlistClosedNotification, notificationInterval.value * 1000)
 }
 
 const stopNotification = () => {

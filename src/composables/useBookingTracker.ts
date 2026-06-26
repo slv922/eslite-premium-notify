@@ -4,7 +4,7 @@ import type { BookingStatus, TrackingOptions } from '../types'
 
 export function useBookingTracker(options: TrackingOptions) {
   const trackingInterval = ref<number | null>(null)
-  const currentBookingCode = ref<string | null>(null)
+  let lastPosition: number | null | undefined = undefined
 
   const checkBookingStatus = async (bookingCode: string): Promise<BookingStatus> => {
     let lastError: any = null
@@ -22,10 +22,15 @@ export function useBookingTracker(options: TrackingOptions) {
           }
         )
         console.log('Booking status response:', response.data)
+        const position: number | null = response.data.position
+        const positionChanged = lastPosition === undefined || position !== lastPosition
+        lastPosition = position
         return {
           bookingCode,
-          position: response.data.position,
-          telegramStatus: await sendTelegramNotification(bookingCode, response.data.position)
+          position,
+          telegramStatus: positionChanged
+            ? await sendTelegramNotification(bookingCode, position)
+            : '位置未變動，略過通知'
         }
       } catch (error) {
         lastError = error
@@ -90,7 +95,7 @@ export function useBookingTracker(options: TrackingOptions) {
       clearInterval(trackingInterval.value)
       trackingInterval.value = null
     }
-    currentBookingCode.value = null
+    lastPosition = undefined
   }
 
   return {
@@ -99,17 +104,3 @@ export function useBookingTracker(options: TrackingOptions) {
   }
 }
 
-// 模擬查詢訂位資訊的 API
-export async function checkBookingStatus(bookingCode: string): Promise<{ position: number; ahead_groups: null }> {
-  // 模擬查詢結果
-  const mockResponse = {
-    position: Math.floor(Math.random() * 50) + 1, // 隨機生成 1 到 50 的位置
-    ahead_groups: null,
-  };
-
-  console.log(`模擬查詢訂位代碼: ${bookingCode}, 回應:`, mockResponse);
-
-  return new Promise((resolve) => {
-    setTimeout(() => resolve(mockResponse), 1000); // 模擬 API 延遲 1 秒
-  });
-}
