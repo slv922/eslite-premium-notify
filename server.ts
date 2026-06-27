@@ -3,7 +3,7 @@ import axios from 'axios'
 import { Telegraf } from 'telegraf'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { Tracker } from './bot/tracker.js'
+import { Tracker, WEB_CHAT_ID } from './bot/tracker.js'
 import { setupBot } from './bot/setup.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -49,9 +49,19 @@ app.get('/api/tracking/sessions', (_req, res) => {
   res.json(tracker ? tracker.getSessions() : [])
 })
 
-app.delete('/api/tracking/sessions/:chatId', (req, res) => {
-  const chatId = parseInt(req.params.chatId)
-  const stopped = tracker ? tracker.stop(chatId) : false
+app.post('/api/tracking/start', async (req, res) => {
+  const { bookingCode } = req.body
+  if (!bookingCode || typeof bookingCode !== 'string') {
+    return res.status(400).json({ error: 'bookingCode required' })
+  }
+  if (!tracker) return res.status(503).json({ error: 'tracker not ready' })
+  await tracker.start(WEB_CHAT_ID, bookingCode.toUpperCase())
+  res.json({ ok: true })
+})
+
+app.delete('/api/tracking/sessions/:sessionKey', (req, res) => {
+  const sessionKey = decodeURIComponent(req.params.sessionKey)
+  const stopped = tracker ? tracker.stopByKey(sessionKey) : false
   res.json({ stopped })
 })
 

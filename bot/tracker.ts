@@ -5,8 +5,10 @@ import { Markup, type Telegraf } from 'telegraf'
 const TABLECHECK_API = 'https://production-booking.tablecheck.com/v2/waitlist/position'
 const POLL_INTERVAL_MS = 60 * 1000
 const ALERT_THRESHOLD = 3
+const WEB_CHAT_ID = 0 // reserved for web-initiated sessions
 
 interface Session {
+  chatId: number
   bookingCode: string
   timerId: NodeJS.Timeout
   lastPosition: number | null
@@ -15,6 +17,7 @@ interface Session {
 }
 
 export interface TrackingUpdate {
+  sessionKey: string
   chatId: number
   bookingCode: string
   position: number | null
@@ -23,6 +26,7 @@ export interface TrackingUpdate {
 }
 
 export interface SessionInfo {
+  sessionKey: string
   chatId: number
   bookingCode: string
   lastPosition: number | null
@@ -30,67 +34,106 @@ export interface SessionInfo {
 }
 
 export class Tracker extends EventEmitter {
-  private sessions = new Map<number, Session>()
+  private sessions = new Map<string, Session>()
 
   constructor(private bot: Telegraf) {
     super()
   }
 
-  async start(chatId: number, bookingCode: string) {
-    this.stop(chatId)
+  private key(chatId: number, bookingCode: string) {
+    return `${chatId}:${bookingCode}`
+  }
 
-    await this.bot.telegram.sendMessage(
-      chatId,
-      `✅ 開始追蹤訂位代碼 *${bookingCode}*\n每 60 秒自動更新一次，當候位 ≤${ALERT_THRESHOLD} 組時會持續提醒。`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          Markup.button.callback('🔄 立即查詢', 'check_now'),
-          Markup.button.callback('🛑 停止追蹤', 'stop_tracking'),
-        ]),
+  async start(chatId: number, bookingCode: string) {
+    const k = this.key(chatId, bookingCode)
+    if (this.sessions.has(k)) {
+      // Already tracking this code — just confirm
+      if (chatId !== WEB_CHAT_ID) {
+        await this.bot.telegram.sendMessage(
+          chatId,
+          `ℹ️ 已在追蹤 *${bookingCode}*`,
+          { parse_mode: 'Markdown' }
+        )
       }
-    )
+      return
+    }
+
+    if (chatId !== WEB_CHAT_ID) {
+      await this.bot.telegram.sendMessage(
+        chatId,
+        `✅ 開始追蹤訂位代碼 *${bookingCode}*\n每 60 秒自動更新，候位 ≤${ALERT_THRESHOLD} 組時會提醒。`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            Markup.button.callback('🔄 立即查詢', `check:${bookingCode}`),
+            Markup.button.callback('🛑 停止', `stop:${bookingCode}`),
+          ]),
+        }
+      )
+    }
 
     const session: Session = {
+      chatId,
       bookingCode,
-      timerId: setInterval(() => this.poll(chatId), POLL_INTERVAL_MS),
+      timerId: setInterval(() => this.poll(k), POLL_INTERVAL_MS),
       lastPosition: null,
       lastCheckedAt: null,
       isFirstCheck: true,
     }
-    this.sessions.set(chatId, session)
+    this.sessions.set(k, session)
     this.emitSessions()
 
-    await this.poll(chatId)
+    await this.poll(k)
   }
 
-  stop(chatId: number): boolean {
-    const session = this.sessions.get(chatId)
+  stop(chatId: number, bookingCode?: string): boolean {
+    if (bookingCode) {
+      return this.stopOne(this.key(chatId, bookingCode))
+    }
+    // Stop all sessions for this chatId
+    let stopped = false
+    for (const [k, s] of this.sessions) {
+      if (s.chatId === chatId) {
+        this.stopOne(k)
+        stopped = true
+      }
+    }
+    return stopped
+  }
+
+  stopByKey(sessionKey: string): boolean {
+    return this.stopOne(sessionKey)
+  }
+
+  private stopOne(k: string): boolean {
+    const session = this.sessions.get(k)
     if (!session) return false
     clearInterval(session.timerId)
-    this.sessions.delete(chatId)
+    this.sessions.delete(k)
     this.emitSessions()
     return true
   }
 
-  getSession(chatId: number): Session | undefined {
-    return this.sessions.get(chatId)
+  getSession(chatId: number, bookingCode: string): Session | undefined {
+    return this.sessions.get(this.key(chatId, bookingCode))
   }
 
   getSessions(): SessionInfo[] {
-    return Array.from(this.sessions.entries()).map(([chatId, s]) => ({
-      chatId,
+    return Array.from(this.sessions.values()).map(s => ({
+      sessionKey: this.key(s.chatId, s.bookingCode),
+      chatId: s.chatId,
       bookingCode: s.bookingCode,
       lastPosition: s.lastPosition,
       lastCheckedAt: s.lastCheckedAt?.toISOString() ?? null,
     }))
   }
 
-  async pollNow(chatId: number) {
-    const session = this.sessions.get(chatId)
+  async pollNow(chatId: number, bookingCode: string) {
+    const k = this.key(chatId, bookingCode)
+    const session = this.sessions.get(k)
     if (!session) return false
     session.isFirstCheck = true
-    await this.poll(chatId)
+    await this.poll(k)
     return true
   }
 
@@ -98,8 +141,8 @@ export class Tracker extends EventEmitter {
     this.emit('sessions', this.getSessions())
   }
 
-  private async poll(chatId: number) {
-    const session = this.sessions.get(chatId)
+  private async poll(k: string) {
+    const session = this.sessions.get(k)
     if (!session) return
 
     let position: number | null = null
@@ -114,10 +157,12 @@ export class Tracker extends EventEmitter {
       )
       position = res.data.position ?? null
     } catch {
-      await this.bot.telegram.sendMessage(
-        chatId,
-        `⚠️ 查詢失敗，60 秒後重試... (代碼：${session.bookingCode})`
-      )
+      if (session.chatId !== WEB_CHAT_ID) {
+        await this.bot.telegram.sendMessage(
+          session.chatId,
+          `⚠️ 查詢失敗，60 秒後重試... (${session.bookingCode})`
+        )
+      }
       return
     }
 
@@ -128,9 +173,9 @@ export class Tracker extends EventEmitter {
     session.lastCheckedAt = new Date()
     session.isFirstCheck = false
 
-    // Always emit to web clients via SSE
     const update: TrackingUpdate = {
-      chatId,
+      sessionKey: k,
+      chatId: session.chatId,
       bookingCode: session.bookingCode,
       position,
       isUrgent,
@@ -138,23 +183,21 @@ export class Tracker extends EventEmitter {
     }
     this.emit('update', update)
 
-    // Telegram: only notify on first check or when urgent (≤3)
-    if (isFirstCheck || isUrgent) {
-      await this.sendStatus(chatId, session.bookingCode, position, isUrgent)
+    if (session.chatId !== WEB_CHAT_ID && (isFirstCheck || isUrgent)) {
+      await this.sendTelegram(session.chatId, session.bookingCode, position, isUrgent)
     }
   }
 
-  private async sendStatus(
+  private async sendTelegram(
     chatId: number,
     bookingCode: string,
     position: number | null,
     isUrgent: boolean
   ) {
     const time = new Date().toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei' })
-
     const buttons = Markup.inlineKeyboard([
-      Markup.button.callback('🔄 立即查詢', 'check_now'),
-      Markup.button.callback('🛑 停止追蹤', 'stop_tracking'),
+      Markup.button.callback('🔄 立即查詢', `check:${bookingCode}`),
+      Markup.button.callback('🛑 停止', `stop:${bookingCode}`),
     ])
 
     if (position === null) {
@@ -163,10 +206,7 @@ export class Tracker extends EventEmitter {
         `📋 *候位狀態*\n代碼：\`${bookingCode}\`\n目前尚無候位資訊\n時間：${time}`,
         { parse_mode: 'Markdown', ...buttons }
       )
-      return
-    }
-
-    if (isUrgent) {
+    } else if (isUrgent) {
       await this.bot.telegram.sendMessage(
         chatId,
         `🚨 *快輪到了！*\n代碼：\`${bookingCode}\`\n前方還有 *${position}* 組\n時間：${time}\n\n請隨時準備入座！`,
@@ -181,3 +221,5 @@ export class Tracker extends EventEmitter {
     }
   }
 }
+
+export { WEB_CHAT_ID }
