@@ -1,7 +1,9 @@
 import express from 'express'
 import axios from 'axios'
+import { Telegraf } from 'telegraf'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
+import { setupBot } from './bot/setup.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -44,5 +46,17 @@ app.get('*', (_req, res) => {
 })
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`)
+  console.log(`Web server running on port ${PORT}`)
 })
+
+// Start Telegram bot in the same process
+if (process.env.TELEGRAM_BOT_TOKEN) {
+  const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN)
+  setupBot(bot)
+  bot.launch()
+  console.log('🤖 Telegram bot started')
+  process.once('SIGINT', () => bot.stop('SIGINT'))
+  process.once('SIGTERM', () => bot.stop('SIGTERM'))
+} else {
+  console.warn('TELEGRAM_BOT_TOKEN not set, bot will not start')
+}
