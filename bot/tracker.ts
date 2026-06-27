@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { EventEmitter } from 'events'
 import { Markup, type Telegraf } from 'telegraf'
 
 const TABLECHECK_API = 'https://production-booking.tablecheck.com/v2/waitlist/position'
@@ -9,13 +10,31 @@ interface Session {
   bookingCode: string
   timerId: NodeJS.Timeout
   lastPosition: number | null
+  lastCheckedAt: Date | null
   isFirstCheck: boolean
 }
 
-export class Tracker {
+export interface TrackingUpdate {
+  chatId: number
+  bookingCode: string
+  position: number | null
+  isUrgent: boolean
+  updatedAt: string
+}
+
+export interface SessionInfo {
+  chatId: number
+  bookingCode: string
+  lastPosition: number | null
+  lastCheckedAt: string | null
+}
+
+export class Tracker extends EventEmitter {
   private sessions = new Map<number, Session>()
 
-  constructor(private bot: Telegraf) {}
+  constructor(private bot: Telegraf) {
+    super()
+  }
 
   async start(chatId: number, bookingCode: string) {
     this.stop(chatId)
@@ -36,9 +55,11 @@ export class Tracker {
       bookingCode,
       timerId: setInterval(() => this.poll(chatId), POLL_INTERVAL_MS),
       lastPosition: null,
+      lastCheckedAt: null,
       isFirstCheck: true,
     }
     this.sessions.set(chatId, session)
+    this.emitSessions()
 
     await this.poll(chatId)
   }
@@ -48,6 +69,7 @@ export class Tracker {
     if (!session) return false
     clearInterval(session.timerId)
     this.sessions.delete(chatId)
+    this.emitSessions()
     return true
   }
 
@@ -55,12 +77,25 @@ export class Tracker {
     return this.sessions.get(chatId)
   }
 
+  getSessions(): SessionInfo[] {
+    return Array.from(this.sessions.entries()).map(([chatId, s]) => ({
+      chatId,
+      bookingCode: s.bookingCode,
+      lastPosition: s.lastPosition,
+      lastCheckedAt: s.lastCheckedAt?.toISOString() ?? null,
+    }))
+  }
+
   async pollNow(chatId: number) {
     const session = this.sessions.get(chatId)
     if (!session) return false
-    session.isFirstCheck = true // force send even if position unchanged
+    session.isFirstCheck = true
     await this.poll(chatId)
     return true
+  }
+
+  private emitSessions() {
+    this.emit('sessions', this.getSessions())
   }
 
   private async poll(chatId: number) {
@@ -89,12 +124,23 @@ export class Tracker {
     const isUrgent = position !== null && position <= ALERT_THRESHOLD
     const positionChanged = position !== session.lastPosition
 
+    session.lastPosition = position
+    session.lastCheckedAt = new Date()
+    session.isFirstCheck = false
+
+    // Emit update for web clients
+    const update: TrackingUpdate = {
+      chatId,
+      bookingCode: session.bookingCode,
+      position,
+      isUrgent,
+      updatedAt: session.lastCheckedAt.toISOString(),
+    }
+    this.emit('update', update)
+
     if (session.isFirstCheck || positionChanged || isUrgent) {
       await this.sendStatus(chatId, session.bookingCode, position, isUrgent)
     }
-
-    session.lastPosition = position
-    session.isFirstCheck = false
   }
 
   private async sendStatus(

@@ -3,6 +3,7 @@ import axios from 'axios'
 import { Telegraf } from 'telegraf'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
+import { Tracker } from './bot/tracker.js'
 import { setupBot } from './bot/setup.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -10,8 +11,12 @@ const app = express()
 const PORT = process.env.PORT || 3000
 const TABLECHECK = 'https://production-booking.tablecheck.com'
 
+// Shared tracker instance used by both bot and SSE
+let tracker: Tracker | null = null
+
 app.use(express.json())
 
+// ── TableCheck API proxy ──────────────────────────────────────────────────────
 app.get('/api/v2/waitlist/status', async (req, res) => {
   try {
     const { shop_slug, service_mode } = req.query
@@ -39,8 +44,39 @@ app.put('/api/v2/waitlist/position/:bookingCode', async (req, res) => {
   }
 })
 
-app.use(express.static(join(__dirname, 'dist')))
+// ── Tracking state API ────────────────────────────────────────────────────────
+app.get('/api/tracking/sessions', (_req, res) => {
+  res.json(tracker ? tracker.getSessions() : [])
+})
 
+// SSE: push live updates to web clients
+app.get('/api/tracking/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.flushHeaders()
+
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+  }
+
+  // Send current state immediately on connect
+  send('sessions', tracker ? tracker.getSessions() : [])
+
+  const onUpdate = (data: unknown) => send('update', data)
+  const onSessions = (data: unknown) => send('sessions', data)
+
+  tracker?.on('update', onUpdate)
+  tracker?.on('sessions', onSessions)
+
+  req.on('close', () => {
+    tracker?.off('update', onUpdate)
+    tracker?.off('sessions', onSessions)
+  })
+})
+
+// ── Vue static files ──────────────────────────────────────────────────────────
+app.use(express.static(join(__dirname, 'dist')))
 app.get('*', (_req, res) => {
   res.sendFile(join(__dirname, 'dist', 'index.html'))
 })
@@ -49,10 +85,11 @@ app.listen(PORT, () => {
   console.log(`Web server running on port ${PORT}`)
 })
 
-// Start Telegram bot in the same process
+// ── Telegram bot ──────────────────────────────────────────────────────────────
 if (process.env.TELEGRAM_BOT_TOKEN) {
   const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN)
-  setupBot(bot)
+  tracker = new Tracker(bot)
+  setupBot(bot, tracker)
   bot.launch()
   console.log('🤖 Telegram bot started')
   process.once('SIGINT', () => bot.stop('SIGINT'))

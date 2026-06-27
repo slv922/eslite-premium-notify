@@ -13,8 +13,7 @@ function parseBookingCode(input: string): string | null {
   return null
 }
 
-export function setupBot(bot: Telegraf): Tracker {
-  const tracker = new Tracker(bot)
+export function setupBot(bot: Telegraf, tracker: Tracker): Tracker {
 
   bot.start(ctx =>
     ctx.reply(

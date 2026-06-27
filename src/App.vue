@@ -53,11 +53,14 @@
               />
 
               <!-- 追蹤結果 -->
-              <BookingStatus 
+              <BookingStatus
                 v-if="bookingStatus"
                 :status="bookingStatus"
                 :last-updated="lastUpdated"
               />
+
+              <!-- Telegram Bot 即時同步 -->
+              <LiveTracking />
             </div>
           </div>
         </div>
@@ -70,6 +73,7 @@
 import { ref, onMounted } from 'vue'
 import BookingForm from './components/BookingForm.vue'
 import BookingStatus from './components/BookingStatus.vue'
+import LiveTracking from './components/LiveTracking.vue'
 import { useBookingTracker } from './composables/useBookingTracker'
 import type { BookingStatus as BookingStatusType } from './types'
 import axios from 'axios'

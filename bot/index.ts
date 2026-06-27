@@ -1,5 +1,6 @@
 import { Telegraf } from 'telegraf'
 import dotenv from 'dotenv'
+import { Tracker } from './tracker.js'
 import { setupBot } from './setup.js'
 
 dotenv.config()
@@ -11,7 +12,8 @@ if (!BOT_TOKEN) {
 }
 
 const bot = new Telegraf(BOT_TOKEN)
-setupBot(bot)
+const tracker = new Tracker(bot)
+setupBot(bot, tracker)
 
 bot.launch()
 console.log('🤖 Bot 已啟動，等待訊息中...')
