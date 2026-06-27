@@ -49,6 +49,12 @@ app.get('/api/tracking/sessions', (_req, res) => {
   res.json(tracker ? tracker.getSessions() : [])
 })
 
+app.delete('/api/tracking/sessions/:chatId', (req, res) => {
+  const chatId = parseInt(req.params.chatId)
+  const stopped = tracker ? tracker.stop(chatId) : false
+  res.json({ stopped })
+})
+
 // SSE: push live updates to web clients
 app.get('/api/tracking/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream')
