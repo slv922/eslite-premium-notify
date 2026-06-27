@@ -55,7 +55,24 @@ app.post('/api/tracking/start', async (req, res) => {
     return res.status(400).json({ error: 'bookingCode required' })
   }
   if (!tracker) return res.status(503).json({ error: 'tracker not ready' })
-  await tracker.start(WEB_CHAT_ID, bookingCode.toUpperCase())
+
+  const code = bookingCode.toUpperCase()
+
+  // Validate code exists before tracking
+  try {
+    await axios.put(
+      `${TABLECHECK}/v2/waitlist/position/${code}`,
+      {},
+      { headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, timeout: 8000 }
+    )
+  } catch (err: any) {
+    if (err?.response?.status === 404) {
+      return res.status(404).json({ error: '訂位代碼不存在或已過期' })
+    }
+    return res.status(502).json({ error: '無法連線查詢，請稍後再試' })
+  }
+
+  await tracker.start(WEB_CHAT_ID, code)
   res.json({ ok: true })
 })
 

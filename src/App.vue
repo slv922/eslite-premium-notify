@@ -90,8 +90,8 @@ async function addTracking() {
   try {
     await axios.post('/api/tracking/start', { bookingCode: code })
     inputCode.value = ''
-  } catch {
-    inputError.value = '新增失敗，請稍後再試'
+  } catch (err: any) {
+    inputError.value = err?.response?.data?.error ?? '新增失敗，請稍後再試'
   } finally {
     adding.value = false
   }

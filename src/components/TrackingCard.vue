@@ -22,11 +22,17 @@
 
     <!-- Position -->
     <div class="text-center py-3">
-      <div v-if="isUrgent" class="text-sm font-bold mb-1 animate-pulse">🚨 快輪到了！</div>
-      <div :class="['text-6xl font-black leading-none', isUrgent ? 'text-white' : 'text-blue-600']">
-        {{ position !== null ? position : '—' }}
-      </div>
-      <div :class="['text-sm mt-2', isUrgent ? 'text-red-100' : 'text-slate-400']">組在前方等候</div>
+      <template v-if="position === 0">
+        <div class="text-2xl font-bold animate-pulse">🎉 輪到您了！</div>
+        <div :class="['text-sm mt-2', isUrgent ? 'text-red-100' : 'text-slate-400']">請前往入座</div>
+      </template>
+      <template v-else>
+        <div v-if="isUrgent" class="text-sm font-bold mb-1 animate-pulse">🚨 快輪到了！</div>
+        <div :class="['text-6xl font-black leading-none', isUrgent ? 'text-white' : 'text-blue-600']">
+          {{ position !== null ? position : '—' }}
+        </div>
+        <div :class="['text-sm mt-2', isUrgent ? 'text-red-100' : 'text-slate-400']">組在前方等候</div>
+      </template>
     </div>
 
     <!-- Footer -->
@@ -39,7 +45,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 
 const props = defineProps<{
   bookingCode: string
@@ -50,7 +56,7 @@ const props = defineProps<{
 
 defineEmits<{ stop: [] }>()
 
-const isUrgent = ref(false)
+const isUrgent = computed(() => props.position !== null && props.position <= 3)
 const countdown = ref<number | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
 
@@ -66,12 +72,7 @@ function updateCountdown() {
   countdown.value = Math.max(0, 60 - elapsed)
 }
 
-watch(() => props.position, (val) => {
-  isUrgent.value = val !== null && val <= 3
-}, { immediate: true })
-
 watch(() => props.lastCheckedAt, () => updateCountdown(), { immediate: true })
-
 onMounted(() => { timer = setInterval(updateCountdown, 1000) })
 onUnmounted(() => { if (timer) clearInterval(timer) })
 </script>

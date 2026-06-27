@@ -1,5 +1,21 @@
+import axios from 'axios'
 import type { Telegraf } from 'telegraf'
 import { Tracker } from './tracker.js'
+
+const TABLECHECK_API = 'https://production-booking.tablecheck.com/v2/waitlist/position'
+
+async function validateCode(code: string): Promise<boolean> {
+  try {
+    await axios.put(`${TABLECHECK_API}/${code}`, {}, {
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      timeout: 8000,
+    })
+    return true
+  } catch (err: any) {
+    if (err?.response?.status === 404) return false
+    return true // network error: let tracker handle it
+  }
+}
 
 function parseBookingCode(input: string): string | null {
   const text = input.trim()
@@ -36,6 +52,7 @@ export async function setupBot(bot: Telegraf, tracker: Tracker) {
     if (!input) return ctx.reply('請輸入訂位代碼，例如：/track EEHWAS')
     const code = parseBookingCode(input)
     if (!code) return ctx.reply('無法識別訂位代碼，請確認格式是否正確。')
+    if (!await validateCode(code)) return ctx.reply(`❌ 訂位代碼 *${code}* 不存在或已過期`, { parse_mode: 'Markdown' })
     await tracker.start(ctx.chat.id, code)
   })
 
@@ -80,10 +97,8 @@ export async function setupBot(bot: Telegraf, tracker: Tracker) {
     const text = ctx.message.text
     if (text.startsWith('/')) return
     const code = parseBookingCode(text)
-    if (code) {
-      await tracker.start(ctx.chat.id, code)
-    } else {
-      ctx.reply('無法識別訂位代碼，請輸入代碼（如 EEHWAS）或完整訂位連結。')
-    }
+    if (!code) return ctx.reply('無法識別訂位代碼，請輸入代碼（如 EEHWAS）或完整訂位連結。')
+    if (!await validateCode(code)) return ctx.reply(`❌ 訂位代碼 *${code}* 不存在或已過期`, { parse_mode: 'Markdown' })
+    await tracker.start(ctx.chat.id, code)
   })
 }
