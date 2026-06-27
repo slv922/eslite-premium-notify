@@ -59,9 +59,9 @@ app.post('/api/tracking/start', async (req, res) => {
   res.json({ ok: true })
 })
 
-app.delete('/api/tracking/sessions/:sessionKey', (req, res) => {
-  const sessionKey = decodeURIComponent(req.params.sessionKey)
-  const stopped = tracker ? tracker.stopByKey(sessionKey) : false
+app.delete('/api/tracking/sessions/:bookingCode', (req, res) => {
+  const bookingCode = req.params.bookingCode.toUpperCase()
+  const stopped = tracker ? tracker.stopByKey(bookingCode) : false
   res.json({ stopped })
 })
 

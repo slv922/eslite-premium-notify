@@ -68,6 +68,7 @@ export async function setupBot(bot: Telegraf, tracker: Tracker) {
     await tracker.pollNow(ctx.chat!.id, code)
   })
 
+
   bot.action(/^stop:(.+)$/, async ctx => {
     const code = ctx.match[1]
     await ctx.answerCbQuery('已停止追蹤')

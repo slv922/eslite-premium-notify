@@ -5,11 +5,11 @@ import { Markup, type Telegraf } from 'telegraf'
 const TABLECHECK_API = 'https://production-booking.tablecheck.com/v2/waitlist/position'
 const POLL_INTERVAL_MS = 60 * 1000
 const ALERT_THRESHOLD = 3
-const WEB_CHAT_ID = 0 // reserved for web-initiated sessions
+const WEB_CHAT_ID = 0
 
 interface Session {
-  chatId: number
   bookingCode: string
+  chatId: number        // who to notify on Telegram (0 = web only)
   timerId: NodeJS.Timeout
   lastPosition: number | null
   lastCheckedAt: Date | null
@@ -17,41 +17,41 @@ interface Session {
 }
 
 export interface TrackingUpdate {
-  sessionKey: string
-  chatId: number
   bookingCode: string
+  chatId: number
   position: number | null
   isUrgent: boolean
   updatedAt: string
 }
 
 export interface SessionInfo {
-  sessionKey: string
-  chatId: number
   bookingCode: string
+  chatId: number
   lastPosition: number | null
   lastCheckedAt: string | null
 }
 
 export class Tracker extends EventEmitter {
+  // Key: bookingCode — one session per code, shared across web and Telegram
   private sessions = new Map<string, Session>()
 
   constructor(private bot: Telegraf) {
     super()
   }
 
-  private key(chatId: number, bookingCode: string) {
-    return `${chatId}:${bookingCode}`
-  }
-
   async start(chatId: number, bookingCode: string) {
-    const k = this.key(chatId, bookingCode)
-    if (this.sessions.has(k)) {
-      // Already tracking this code — just confirm
+    const existing = this.sessions.get(bookingCode)
+
+    if (existing) {
+      // Upgrade web session to Telegram if Telegram user requests same code
+      if (chatId !== WEB_CHAT_ID && existing.chatId === WEB_CHAT_ID) {
+        existing.chatId = chatId
+        this.emitSessions()
+      }
       if (chatId !== WEB_CHAT_ID) {
         await this.bot.telegram.sendMessage(
           chatId,
-          `ℹ️ 已在追蹤 *${bookingCode}*`,
+          `ℹ️ *${bookingCode}* 已在追蹤中`,
           { parse_mode: 'Markdown' }
         )
       }
@@ -73,67 +73,65 @@ export class Tracker extends EventEmitter {
     }
 
     const session: Session = {
-      chatId,
       bookingCode,
-      timerId: setInterval(() => this.poll(k), POLL_INTERVAL_MS),
+      chatId,
+      timerId: setInterval(() => this.poll(bookingCode), POLL_INTERVAL_MS),
       lastPosition: null,
       lastCheckedAt: null,
       isFirstCheck: true,
     }
-    this.sessions.set(k, session)
+    this.sessions.set(bookingCode, session)
     this.emitSessions()
 
-    await this.poll(k)
+    await this.poll(bookingCode)
   }
 
   stop(chatId: number, bookingCode?: string): boolean {
     if (bookingCode) {
-      return this.stopOne(this.key(chatId, bookingCode))
+      return this.stopOne(bookingCode)
     }
-    // Stop all sessions for this chatId
+    // Stop all sessions belonging to this chatId
     let stopped = false
-    for (const [k, s] of this.sessions) {
+    for (const [code, s] of this.sessions) {
       if (s.chatId === chatId) {
-        this.stopOne(k)
+        this.stopOne(code)
         stopped = true
       }
     }
     return stopped
   }
 
-  stopByKey(sessionKey: string): boolean {
-    return this.stopOne(sessionKey)
+  stopByKey(bookingCode: string): boolean {
+    return this.stopOne(bookingCode)
   }
 
-  private stopOne(k: string): boolean {
-    const session = this.sessions.get(k)
+  private stopOne(bookingCode: string): boolean {
+    const session = this.sessions.get(bookingCode)
     if (!session) return false
     clearInterval(session.timerId)
-    this.sessions.delete(k)
+    this.sessions.delete(bookingCode)
     this.emitSessions()
     return true
   }
 
-  getSession(chatId: number, bookingCode: string): Session | undefined {
-    return this.sessions.get(this.key(chatId, bookingCode))
+  getSession(bookingCode: string): Session | undefined {
+    return this.sessions.get(bookingCode)
   }
 
   getSessions(): SessionInfo[] {
     return Array.from(this.sessions.values()).map(s => ({
-      sessionKey: this.key(s.chatId, s.bookingCode),
-      chatId: s.chatId,
       bookingCode: s.bookingCode,
+      chatId: s.chatId,
       lastPosition: s.lastPosition,
       lastCheckedAt: s.lastCheckedAt?.toISOString() ?? null,
     }))
   }
 
   async pollNow(chatId: number, bookingCode: string) {
-    const k = this.key(chatId, bookingCode)
-    const session = this.sessions.get(k)
+    const session = this.sessions.get(bookingCode)
     if (!session) return false
     session.isFirstCheck = true
-    await this.poll(k)
+    await this.poll(bookingCode)
     return true
   }
 
@@ -141,14 +139,14 @@ export class Tracker extends EventEmitter {
     this.emit('sessions', this.getSessions())
   }
 
-  private async poll(k: string) {
-    const session = this.sessions.get(k)
+  private async poll(bookingCode: string) {
+    const session = this.sessions.get(bookingCode)
     if (!session) return
 
     let position: number | null = null
     try {
       const res = await axios.put(
-        `${TABLECHECK_API}/${session.bookingCode}`,
+        `${TABLECHECK_API}/${bookingCode}`,
         {},
         {
           headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -156,13 +154,18 @@ export class Tracker extends EventEmitter {
         }
       )
       position = res.data.position ?? null
-    } catch {
+    } catch (err: any) {
+      const is404 = err?.response?.status === 404
       if (session.chatId !== WEB_CHAT_ID) {
         await this.bot.telegram.sendMessage(
           session.chatId,
-          `⚠️ 查詢失敗，60 秒後重試... (${session.bookingCode})`
+          is404
+            ? `❌ 訂位代碼 *${bookingCode}* 不存在或已過期，停止追蹤。`
+            : `⚠️ 查詢失敗，60 秒後重試... (${bookingCode})`,
+          { parse_mode: 'Markdown' }
         )
       }
+      if (is404) this.stopOne(bookingCode)
       return
     }
 
@@ -174,9 +177,8 @@ export class Tracker extends EventEmitter {
     session.isFirstCheck = false
 
     const update: TrackingUpdate = {
-      sessionKey: k,
+      bookingCode,
       chatId: session.chatId,
-      bookingCode: session.bookingCode,
       position,
       isUrgent,
       updatedAt: session.lastCheckedAt.toISOString(),
@@ -184,7 +186,7 @@ export class Tracker extends EventEmitter {
     this.emit('update', update)
 
     if (session.chatId !== WEB_CHAT_ID && (isFirstCheck || isUrgent)) {
-      await this.sendTelegram(session.chatId, session.bookingCode, position, isUrgent)
+      await this.sendTelegram(session.chatId, bookingCode, position, isUrgent)
     }
   }
 

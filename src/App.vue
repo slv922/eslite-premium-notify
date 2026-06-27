@@ -38,12 +38,12 @@
       <!-- Tracking cards -->
       <TrackingCard
         v-for="s in sessions"
-        :key="s.sessionKey"
+        :key="s.bookingCode"
         :booking-code="s.bookingCode"
         :position="s.lastPosition"
         :last-checked-at="s.lastCheckedAt"
         :source="s.chatId === 0 ? 'web' : 'telegram'"
-        @stop="stopSession(s.sessionKey)"
+        @stop="stopSession(s.bookingCode)"
       />
 
     </div>
@@ -56,9 +56,8 @@ import axios from 'axios'
 import TrackingCard from './components/TrackingCard.vue'
 
 interface SessionInfo {
-  sessionKey: string
-  chatId: number
   bookingCode: string
+  chatId: number
   lastPosition: number | null
   lastCheckedAt: string | null
 }
@@ -98,9 +97,9 @@ async function addTracking() {
   }
 }
 
-async function stopSession(sessionKey: string) {
+async function stopSession(bookingCode: string) {
   try {
-    await axios.delete(`/api/tracking/sessions/${encodeURIComponent(sessionKey)}`)
+    await axios.delete(`/api/tracking/sessions/${bookingCode}`)
   } catch { /* ignore */ }
 }
 
@@ -113,11 +112,10 @@ onMounted(() => {
 
   es.addEventListener('update', (e) => {
     const u = JSON.parse(e.data)
-    const idx = sessions.value.findIndex(s => s.sessionKey === u.sessionKey)
+    const idx = sessions.value.findIndex(s => s.bookingCode === u.bookingCode)
     const updated: SessionInfo = {
-      sessionKey: u.sessionKey,
-      chatId: u.chatId,
       bookingCode: u.bookingCode,
+      chatId: u.chatId,
       lastPosition: u.position,
       lastCheckedAt: u.updatedAt,
     }
