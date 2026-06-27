@@ -122,13 +122,13 @@ export class Tracker extends EventEmitter {
     }
 
     const isUrgent = position !== null && position <= ALERT_THRESHOLD
-    const positionChanged = position !== session.lastPosition
+    const isFirstCheck = session.isFirstCheck
 
     session.lastPosition = position
     session.lastCheckedAt = new Date()
     session.isFirstCheck = false
 
-    // Emit update for web clients
+    // Always emit to web clients via SSE
     const update: TrackingUpdate = {
       chatId,
       bookingCode: session.bookingCode,
@@ -138,7 +138,8 @@ export class Tracker extends EventEmitter {
     }
     this.emit('update', update)
 
-    if (session.isFirstCheck || positionChanged || isUrgent) {
+    // Telegram: only notify on first check or when urgent (≤3)
+    if (isFirstCheck || isUrgent) {
       await this.sendStatus(chatId, session.bookingCode, position, isUrgent)
     }
   }
