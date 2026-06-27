@@ -13,7 +13,7 @@ if (!BOT_TOKEN) {
 
 const bot = new Telegraf(BOT_TOKEN)
 const tracker = new Tracker(bot)
-setupBot(bot, tracker)
+await setupBot(bot, tracker)
 
 bot.launch()
 console.log('🤖 Bot 已啟動，等待訊息中...')

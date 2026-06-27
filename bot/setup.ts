@@ -11,7 +11,13 @@ function parseBookingCode(input: string): string | null {
   return null
 }
 
-export function setupBot(bot: Telegraf, tracker: Tracker) {
+export async function setupBot(bot: Telegraf, tracker: Tracker) {
+  await bot.telegram.setMyCommands([
+    { command: 'track', description: '開始追蹤訂位代碼，例如 /track EEHWAS' },
+    { command: 'list',  description: '查看目前追蹤中的所有代碼' },
+    { command: 'stop',  description: '停止追蹤，可指定代碼或全部停止' },
+  ])
+
   bot.start(ctx =>
     ctx.reply(
       '👋 歡迎使用候位追蹤機器人！\n\n' +

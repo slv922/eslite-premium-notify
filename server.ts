@@ -105,7 +105,7 @@ app.listen(PORT, () => {
 if (process.env.TELEGRAM_BOT_TOKEN) {
   const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN)
   tracker = new Tracker(bot)
-  setupBot(bot, tracker)
+  await setupBot(bot, tracker)
   bot.launch()
   console.log('🤖 Telegram bot started')
   process.once('SIGINT', () => bot.stop('SIGINT'))
