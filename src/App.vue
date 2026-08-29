@@ -55,6 +55,9 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
 import TrackingCard from './components/TrackingCard.vue'
 
+const STORAGE_KEY = 'eslite-sessions'
+const POLL_INTERVAL = 60_000
+
 interface SessionInfo {
   bookingCode: string
   chatId: number
@@ -66,7 +69,20 @@ const sessions = ref<SessionInfo[]>([])
 const inputCode = ref('')
 const inputError = ref('')
 const adding = ref(false)
-let es: EventSource | null = null
+const timers = new Map<string, ReturnType<typeof setInterval>>()
+
+function loadSessions() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    sessions.value = raw ? JSON.parse(raw) : []
+  } catch {
+    sessions.value = []
+  }
+}
+
+function saveSessions() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.value)) } catch {}
+}
 
 function parseCode(input: string): string | null {
   const t = input.trim()
@@ -78,17 +94,48 @@ function parseCode(input: string): string | null {
   return null
 }
 
+async function pollSession(code: string) {
+  try {
+    const res = await axios.put(`/api/v2/waitlist/position/${code}`, {}, {
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      timeout: 8000,
+    })
+    const idx = sessions.value.findIndex(s => s.bookingCode === code)
+    if (idx >= 0) {
+      sessions.value[idx].lastPosition = res.data.position ?? null
+      sessions.value[idx].lastCheckedAt = new Date().toISOString()
+      saveSessions()
+    }
+  } catch (err: any) {
+    if (err?.response?.status === 404) removeSession(code)
+  }
+}
+
+function startPolling(code: string) {
+  if (timers.has(code)) return
+  pollSession(code)
+  timers.set(code, setInterval(() => pollSession(code), POLL_INTERVAL))
+}
+
+function removeSession(code: string) {
+  const timer = timers.get(code)
+  if (timer) { clearInterval(timer); timers.delete(code) }
+  sessions.value = sessions.value.filter(s => s.bookingCode !== code)
+  saveSessions()
+}
+
 async function addTracking() {
   inputError.value = ''
   const code = parseCode(inputCode.value)
   if (!code) { inputError.value = '請輸入有效的訂位代碼（4–12位英數字）或完整網址'; return }
-
-  const alreadyTracked = sessions.value.some(s => s.bookingCode === code)
-  if (alreadyTracked) { inputError.value = `${code} 已在追蹤中`; return }
+  if (sessions.value.some(s => s.bookingCode === code)) { inputError.value = `${code} 已在追蹤中`; return }
 
   adding.value = true
   try {
     await axios.post('/api/tracking/start', { bookingCode: code })
+    sessions.value.push({ bookingCode: code, chatId: 0, lastPosition: null, lastCheckedAt: null })
+    saveSessions()
+    startPolling(code)
     inputCode.value = ''
   } catch (err: any) {
     inputError.value = err?.response?.data?.error ?? '新增失敗，請稍後再試'
@@ -98,31 +145,17 @@ async function addTracking() {
 }
 
 async function stopSession(bookingCode: string) {
-  try {
-    await axios.delete(`/api/tracking/sessions/${bookingCode}`)
-  } catch { /* ignore */ }
+  try { await axios.delete(`/api/tracking/sessions/${bookingCode}`) } catch {}
+  removeSession(bookingCode)
 }
 
 onMounted(() => {
-  es = new EventSource('/api/tracking/events')
-
-  es.addEventListener('sessions', (e) => {
-    sessions.value = JSON.parse(e.data)
-  })
-
-  es.addEventListener('update', (e) => {
-    const u = JSON.parse(e.data)
-    const idx = sessions.value.findIndex(s => s.bookingCode === u.bookingCode)
-    const updated: SessionInfo = {
-      bookingCode: u.bookingCode,
-      chatId: u.chatId,
-      lastPosition: u.position,
-      lastCheckedAt: u.updatedAt,
-    }
-    if (idx >= 0) sessions.value[idx] = updated
-    else sessions.value.push(updated)
-  })
+  loadSessions()
+  sessions.value.forEach(s => startPolling(s.bookingCode))
 })
 
-onUnmounted(() => es?.close())
+onUnmounted(() => {
+  timers.forEach(t => clearInterval(t))
+  timers.clear()
+})
 </script>
